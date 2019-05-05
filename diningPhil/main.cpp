@@ -2,10 +2,10 @@
 #include <stdlib.h>
 #include <unistd.h> 
 #include <time.h>
+#define _POSIX_C_SOURCE 200809L
 #include <string.h>
 #include <pthread.h>
 #include <stdbool.h>
-#include "hashtable.h"
 
 int counter;
 pthread_mutex_t readerLock;
@@ -16,7 +16,28 @@ int readCount = 0;
 #define KEY_LENGTH 3
 #define VALUE_LENGTH 6
 #define NO_OF_BUCKETS 256
+//creates items for the hash table
 
+typedef struct _ht_item {
+	_ht_item *next;
+	char* key;
+	char* value;
+} ht_item;
+
+//creates a hash table using ht_item's items(key and value)
+typedef struct {
+	// Add your implementation here.
+	int size;
+	int count;
+	ht_item** items;
+} ht_hash_table;
+
+
+ht_hash_table* ht_new();
+void ht_del_hash_table(ht_hash_table* ht);
+void ht_insert(ht_hash_table* ht, const char* key, const char* value);
+char* ht_search(ht_hash_table* ht, const char* key);
+void ht_delete(ht_hash_table* h, const char* key);
 typedef struct {
 	ht_hash_table *ht;
 	char *key;
@@ -28,20 +49,20 @@ typedef struct {
 	char *key;
 } search_item_t;
 
-unsigned int ht_calc_hash(unsigned char* key)
+int ht_calc_hash(const char* key)
 {
-	unsigned int h = 5381;
+	int h = 5381;
 	while (*(key++))
-		h = ((h << 5) + h) + (*key);
+		h = ((h << 5) + h) + (unsigned char)(*key);
 	return h % NO_OF_BUCKETS; //places the string into a random bucket from 0 to 255 decided by the hash of the string
 }
 
 ht_item* ht_new_item(const char* k, const char* v)
 {
-	ht_item* i = malloc(sizeof(ht_item));
+	ht_item* i = (ht_item*)malloc(sizeof(ht_item));
 	i->key = strdup(k);
 	i->value = strdup(v);
-	i->next = 0; //initializes to NULL for last entry like Linked List
+	i->next = (ht_item *)0; //initializes to NULL for last entry like Linked List
 	return i;
 }
 
@@ -106,7 +127,7 @@ char* ht_search(ht_hash_table* ht, const char* key)
 	int hash = ht_calc_hash(key);
 	ht_item* my_bucket = ht->items[hash];
 	if (!my_bucket) {
-		return (void *)0;
+		return (char *)0;
 	}
 	while (my_bucket) {
 		if (strcmp(my_bucket->key, key) == 0) {
@@ -122,7 +143,7 @@ char* ht_search(ht_hash_table* ht, const char* key)
 		pthread_mutex_unlock(&writerLock);
 	}
 	pthread_mutex_unlock(&readerLock);
-	return (void *)0;
+	return (char *)0;
 }
 
 void ht_delete(ht_hash_table* ht, const char* key)
@@ -166,19 +187,19 @@ void *search(void *in)
 
 char *random_string(const int size, char **blacklist, size_t blacklist_count)
 {
-	int upper = 90;
-	int lower = 65;
+	char upper = 90;
+	char lower = 65;
 
-	char *buffer = calloc(size + 1, sizeof(char));
-	bool found = false;
-	do {
-		FILE *f = fopen("/dev/urandom", "r");
-		fread(buffer, size, sizeof(char), f);
-		for (int i = 0; i < size; i++) {
-			buffer[i] = (abs(buffer[i]) % (upper - lower + 1)) + lower;
+	char *buffer = (char *)calloc(size + 1, sizeof(char));
+	FILE *f = fopen("/dev/urandom", "r");
+	fread(buffer, size, sizeof(char), f);
+	for (int i = 0; i < size; i++) {
+		if (buffer[i] < 0) {
+			buffer[i] = -buffer[i];
 		}
-		fclose(f);
-	} while (found == true);
+		buffer[i] = (buffer[i] % (upper - lower + 1)) + lower;
+	}
+	fclose(f);
 
 	return buffer;
 }
@@ -186,10 +207,10 @@ char *random_string(const int size, char **blacklist, size_t blacklist_count)
 ht_hash_table* ht_new() {
 	int size = sizeof(ht_hash_table);
 	int i;
-	ht_hash_table *ht = malloc(size);
+	ht_hash_table *ht = (ht_hash_table *)malloc(size);
 	ht->count = 0;
 	ht->size = 0;
-	ht->items = malloc(sizeof(ht_item *) * NO_OF_BUCKETS);
+	ht->items = (ht_item **)malloc(sizeof(ht_item *) * NO_OF_BUCKETS);
 	for (i = 0; i < NO_OF_BUCKETS; i++) {
 		ht->items[i] = (ht_item *)0;
 	}
@@ -221,21 +242,21 @@ int main() {
 	for (int i = 0; i < MAX_INSERT_THREADS; i++) {
 		keys[i] = random_string(KEY_LENGTH, keys, MAX_INSERT_THREADS);
 		values[i] = random_string(VALUE_LENGTH, values, MAX_INSERT_THREADS);
-		insert_item_t *insert_item = malloc(sizeof(insert_item_t));
+		insert_item_t *insert_item = (insert_item_t *)malloc(sizeof(insert_item_t));
 		insert_item->ht = ht;
 		insert_item->key = keys[i];
 		insert_item->value = values[i];
-		pthread_create(&insert_threads[i], (void *)0, insert_worker, (void*)insert_item);
+		pthread_create(&insert_threads[i], (pthread_attr_t *)0, insert_worker, (void*)insert_item);
 	}
 
 	for (int i = 0; i < MAX_INSERT_THREADS; i++) {
-		pthread_join(insert_threads[i], (void *)0);
+		pthread_join(insert_threads[i], (void **)0);
 	}
 
 	for (int i = 0; i < MAX_INSERT_THREADS;) {
 		for (int j = 0; j < MAX_COMPARE_THREADS && i < MAX_INSERT_THREADS; i++, j++) {
 			search_item_t search_item = { ht, keys[i] };
-			pthread_create(&compare_threads[i], (void *)0, search, &search_item);
+			pthread_create(&compare_threads[i], (pthread_attr_t *)0, search, &search_item);
 			char *result;
 			pthread_join(compare_threads[i], (void**)&result);
 			if (strcmp(result, values[i]) != 0) {
@@ -244,7 +265,7 @@ int main() {
 			}
 		}
 		for (int i = 0; i < MAX_COMPARE_THREADS; i++) {
-			pthread_join(compare_threads[i], (void *)0);
+			pthread_join(compare_threads[i], (void **)0);
 		}
 	}
 
